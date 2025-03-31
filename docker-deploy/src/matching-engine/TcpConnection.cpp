@@ -22,7 +22,7 @@ void TcpConnection::start() {
 }
 
 void TcpConnection::handle_read(const boost::system::error_code& error, size_t bytes) {
-    if (error) {
+    if (error) { //prob just EOF since connection closed, don't register another async_read_some
         std::cout << error.message() << std::endl;
         return;
     }
@@ -81,14 +81,20 @@ int TcpConnection::parse_message() {
 
     if (eResult != tinyxml2::XML_SUCCESS) {
         std::cout << "Error parsing XML: " << doc.ErrorStr() << std::endl;
+        message.clear();
         return -1;
     }
 
     tinyxml2::XMLNode* root = doc.FirstChildElement();
     if (root == nullptr) {
         std::cout << "Root element not found" << std::endl;
+        message.clear();
         return -1;
     }
+
+    tinyxml2::XMLDocument responseDoc;
+    tinyxml2::XMLElement* respRoot = responseDoc.NewElement("results");
+    responseDoc.InsertFirstChild(respRoot);
 
     if (std::string(root->Value()) == "create") {
         for (tinyxml2::XMLElement* element = root->FirstChildElement(); element != nullptr; element = element->NextSiblingElement()) {
@@ -102,15 +108,39 @@ int TcpConnection::parse_message() {
                 std::cout << "id: " << id << std::endl;
                 std::cout << "balance: " << balance << std::endl;
 
+                std::string error_message; //used for more user-freindly error messages
                 //probably call create_account here
                 try {
                     DatabaseTransactions::create_account(C, id, balance);
+
                 } catch (const pqxx::sql_error &e) {
                     std::cout << "psql error in create_account: " << e.what() << std::endl;
+                    error_message = e.what();
+
                 } catch (const std::exception &e) {
                     std::cout << "unknown exception in create_account: " << e.what() << std::endl;
+                    error_message = e.what();
                 }
 
+                tinyxml2::XMLElement* child;
+                if (error_message.empty()) {
+                    child = responseDoc.NewElement("created");
+                } else {
+                    child = responseDoc.NewElement("error");
+
+                    if (error_message.find("duplicate key value violates unique constraint") != std::string::npos) {
+                        error_message = "Account already exists.";
+                    } else if (error_message.find("violates check constraint") != std::string::npos) {
+                        error_message = "Balance cannot be negative.";
+                    } else {
+                        error_message = "Unexpected error."; //general exception handling
+                    }
+
+                    child->SetText(error_message.c_str());
+                }
+                
+                child->SetAttribute("id", id);
+                respRoot->InsertEndChild(child);
                 
 
             } else if (std::string(element->Value()) == "symbol") {
@@ -126,24 +156,45 @@ int TcpConnection::parse_message() {
                     int num_shares = element2->IntText();
 
                     //probably call insert_shares here
+                    std::string error_message;
                     try {
                         DatabaseTransactions::insert_shares(C, id, symbol_name, num_shares);
+                        
                     } catch (const pqxx::sql_error &e) {
                         std::cout << "psql error in insert_shares: " << e.what() << std::endl;
+                        error_message = e.what();
                     } catch (const std::exception &e) {
                         std::cout << "unknown exception in insert_shares: " << e.what() << std::endl;
+                        error_message = e.what();
                     }
+
+                    tinyxml2::XMLElement* child;
+                    if (error_message.empty()) {
+                        child = responseDoc.NewElement("created");
+                    } else {
+                        child = responseDoc.NewElement("error");
+
+                        if (error_message.find("violates foreign key constraint") != std::string::npos) {
+                            error_message = "Account does not exist.";
+                        } else if (error_message.find("violates check constraint") != std::string::npos) {
+                            error_message = "Number of shares cannot be negative.";
+                        } else {
+                            error_message = "Unexpected error."; //general exception handling
+                        }
+
+                        child->SetText(error_message.c_str());
+                    }
+
+                    child->SetAttribute("sym", sym);
+                    child->SetAttribute("id", id);
+                    respRoot->InsertEndChild(child);
                     
                 }
 
 
             } else {
                 std::cout << "received invalid element in create" << std::endl;
-                break;
             }
-            //const char* name = element->FirstChildElement("name")->GetText();
-            //int value = 0;
-            //element->FirstChildElement("value")->QueryIntText(&value);
     
         }
 
@@ -163,7 +214,38 @@ int TcpConnection::parse_message() {
                 element->QueryIntAttribute("amount", &amount);
                 element->QueryFloatAttribute("limit", &limit);
 
-                DatabaseTransactions::place_order(C, id, symbol_name, amount, limit);
+                std::string error_message;
+                try {
+                    DatabaseTransactions::place_order(C, id, symbol_name, amount, limit);
+                    
+                } catch (const pqxx::sql_error &e) {
+                    std::cout << "psql error in place_order: " << e.what() << std::endl;
+                    error_message = e.what();
+                } catch (const std::exception &e) {
+                    std::cout << "unknown exception in place_order: " << e.what() << std::endl;
+                    error_message = e.what();
+                }
+
+                tinyxml2::XMLElement* child;
+                if (error_message.empty()) {
+                    child = responseDoc.NewElement("opened");
+                } else {
+                    child = responseDoc.NewElement("error");
+
+                    if (error_message.find("violates foreign key constraint") != std::string::npos) {
+                        error_message = "Account does not exist.";
+                    } else if (error_message.find("violates check constraint") != std::string::npos) {
+                        error_message = "Number of shares cannot be negative.";
+                    } else {
+                        error_message = "Unexpected error."; //general exception handling
+                    }
+
+                    child->SetText(error_message.c_str());
+                }
+
+                child->SetAttribute("sym", sym);
+                child->SetAttribute("id", id);
+                respRoot->InsertEndChild(child);
 
 
             } else if (std::string(element->Value()) == "query") {
@@ -188,7 +270,16 @@ int TcpConnection::parse_message() {
 
     } else {
         std::cout << "received invalid root element: must be create or transaction" << std::endl;
+        message.clear();
+        return -1;
     }
+
+    //create string from xmlResponse
+    tinyxml2::XMLPrinter printer;
+    responseDoc.Print(&printer);
+    std::string responseString = printer.CStr();
+    std::cout << "response xml: " << std::endl;
+    std::cout << responseString << std::endl;
 
     message.clear();
 
