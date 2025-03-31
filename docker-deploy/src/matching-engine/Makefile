@@ -1,8 +1,8 @@
 CC=g++
 CFLAGS=-O3
-LIBS=
-DEPS=
-OBJECTS=
+LIBS=-ltinyxml2 -lpqxx -lpq
+DEPS=DatabaseTransactions.h MatchingEngineServer.h TcpConnection.h
+OBJECTS=DatabaseTransactions.o main.o MatchingEngineServer.o TcpConnection.o
 
 all: main
 

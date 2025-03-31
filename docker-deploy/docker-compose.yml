@@ -1,6 +1,15 @@
 version: '2'
 
 services:
+  db:
+    image: postgres
+    environment:
+      - POSTGRES_DB=postgres
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+    volumes:
+      - data-volume:/var/lib/postgresql/data
+
   matching-engine:
       build: ./src/matching-engine
       volumes:
@@ -8,5 +17,7 @@ services:
       ports:
         - "12345:12345" #bind port 12345 of current machine to 12345 in container
       command: sh -c "make all && ./main"
-
-  db:
+      depends_on:
+        - db
+volumes:
+  data-volume:
