@@ -2,10 +2,16 @@
 #include "TcpConnection.h"
 #include <iostream>
 #include "DatabaseTransactions.h"
+#include <stdexcept>
 
 MatchingEngineServer::MatchingEngineServer(boost::asio::io_context& io_context, int port) : io_context_(io_context), acceptor_(io_context, boost::asio::ip::tcp::endpoint(boost::asio::ip::tcp::v4(), port)) {
     //open db connection
-    db = db_ptr (DatabaseTransactions::connect()); //delete being called on a pqxx::connection will first call destructor which will close connection
+    pqxx::connection* C = DatabaseTransactions::connect();
+    if (C == nullptr) {
+        throw std::runtime_error("Error connecting to database");
+    }
+
+    db = db_ptr (C); //delete being called on a pqxx::connection will first call destructor which will close connection
     start_accept(); //only 1 thread calls
 }
 

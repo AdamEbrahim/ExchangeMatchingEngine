@@ -90,26 +90,29 @@ int TcpConnection::parse_message() {
         return -1;
     }
 
-    if (root->Value() == "create") {
+    if (std::string(root->Value()) == "create") {
         for (tinyxml2::XMLElement* element = root->FirstChildElement(); element != nullptr; element = element->NextSiblingElement()) {
 
-            if (element->Value() == "account") {
-                int id = 0;
-                int balance = 0;
-                element->QueryIntAttribute("id", &id);
-                element->QueryIntAttribute("balance", &balance);
+            if (std::string(element->Value()) == "account") {
+                uint32_t id = 0;
+                float balance = 0;
+                element->QueryUnsignedAttribute("id", &id);
+                element->QueryFloatAttribute("balance", &balance);
+
+                std::cout << "id: " << id << std::endl;
+                std::cout << "balance: " << balance << std::endl;
 
                 
 
-            } else if (element->Value() == "symbol") {
+            } else if (std::string(element->Value()) == "symbol") {
                 const char* sym = nullptr;
                 element->QueryStringAttribute("sym", &sym);
                 std::string symbol_name (sym);
                 
                 //get all children account elements
                 for (tinyxml2::XMLElement* element2 = element->FirstChildElement(); element2 != nullptr; element2 = element2->NextSiblingElement()) {
-                    int id = 0;
-                    element2->QueryIntAttribute("id", &id);
+                    uint32_t id = 0;
+                    element2->QueryUnsignedAttribute("id", &id);
 
                     int num_shares = element2->IntText();
 
@@ -126,7 +129,7 @@ int TcpConnection::parse_message() {
     
         }
 
-    } else if (root->Value() == "transactions") {
+    } else if (std::string(root->Value()) == "transactions") {
 
     } else {
         std::cout << "received invalid root element: must be create or transaction" << std::endl;

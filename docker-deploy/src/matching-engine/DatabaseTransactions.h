@@ -8,9 +8,9 @@ public:
     
     static pqxx::connection* connect();
 
-    static int create_account(int id, int start_balance);
+    static int create_account(uint32_t account_id, float start_balance);
 
-    static int insert_shares(std::string symbol, int amount);
+    static int insert_shares(uint32_t account_id, std::string symbol, int amount);
 
 };
 
