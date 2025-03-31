@@ -24,50 +24,53 @@ pqxx::connection* DatabaseTransactions::connect() {
     try {
         pqxx::work W(*C);
     
-        // Drop existing tables to reset
+        //drop existing tables to reset
         W.exec("DROP TABLE IF EXISTS Trades CASCADE;");
         W.exec("DROP TABLE IF EXISTS Orders CASCADE;");
         W.exec("DROP TABLE IF EXISTS Holdings CASCADE;");
         W.exec("DROP TABLE IF EXISTS Accounts CASCADE;");
     
-        // Create Accounts table
+        //accounts table
         W.exec("CREATE TABLE Accounts ("
-               "account_id SERIAL PRIMARY KEY,"
+               "account_id BIGINT PRIMARY KEY,"
                "balance FLOAT NOT NULL CHECK (balance >= 0));");
     
-        // Create Orders table (supports partial execution)
+        //orders table
         W.exec("CREATE TABLE Orders ("
                "order_id SERIAL PRIMARY KEY,"
-               "account_id INTEGER REFERENCES Accounts(account_id) ON DELETE CASCADE,"
-               "symbol VARCHAR(10) NOT NULL,"
-               "amount INTEGER NOT NULL,"  // Total order size (buy = positive, sell = negative)
-               "amount_remaining INTEGER NOT NULL,"  // Unfilled portion
-               "price FLOAT NOT NULL,"  // Limit price
-               "status VARCHAR(20) NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'partially_executed', 'executed', 'canceled')),"
-               "timestamp TIMESTAMP DEFAULT now());");
+               "account_id BIGINT,"
+               "symbol VARCHAR(20) NOT NULL,"
+               "original_shares INTEGER NOT NULL," //amount of shares initially requested (buy = positive, sell = negative)
+               "open_shares INTEGER NOT NULL,"  //amount of shares open (buy = positive, sell = negative)
+               "limit_price FLOAT NOT NULL,"  //user given limit price
+               "timestamp TIMESTAMP DEFAULT now()," //when order arrived
+               "FOREIGN KEY (account_id) REFERENCES ACCOUNTS(account_id) ON DELETE CASCADE);");
     
-        // Create Trades table (logs executions)
+        //executed trades table
         W.exec("CREATE TABLE Trades ("
                "trade_id SERIAL PRIMARY KEY,"
-               "buy_order_id INTEGER REFERENCES Orders(order_id) ON DELETE SET NULL,"
-               "sell_order_id INTEGER REFERENCES Orders(order_id) ON DELETE SET NULL,"
-               "symbol VARCHAR(10) NOT NULL,"
-               "trade_amount INTEGER NOT NULL,"  // How many shares were matched
-               "price FLOAT NOT NULL,"  // Price at execution
-               "timestamp TIMESTAMP DEFAULT now());");
+               "buy_order_id INTEGER,"
+               "sell_order_id INTEGER,"
+               "symbol VARCHAR(20) NOT NULL,"
+               "traded_shares INTEGER NOT NULL," //how many shares were traded in this trade (could be partial execution)
+               "price FLOAT NOT NULL," //price the trade was executed at
+               "timestamp TIMESTAMP DEFAULT now(),"
+               "FOREIGN KEY (buy_order_id) REFERENCES ORDERS(order_id) ON DELETE SET NULL," //setting NULL on delete of the connected order_id, might need to CASCADE
+               "FOREIGN KEY (sell_order_id) REFERENCES ORDERS(order_id) ON DELETE SET NULL);");
     
-        // Create Holdings table (tracks ownership)
+        //holdings (symbol ownership) table
         W.exec("CREATE TABLE Holdings ("
                "id SERIAL PRIMARY KEY,"
-               "account_id INTEGER REFERENCES Accounts(account_id) ON DELETE CASCADE,"
-               "symbol VARCHAR(10) NOT NULL,"
+               "account_id BIGINT,"
+               "symbol VARCHAR(20) NOT NULL,"
                "amount INTEGER NOT NULL CHECK (amount >= 0),"
+               "FOREIGN KEY (account_id) REFERENCES ACCOUNTS(account_id) ON DELETE CASCADE,"
                "UNIQUE (account_id, symbol));");
     
         W.commit();
-        std::cout << "Database tables reset and initialized successfully." << std::endl;
+        std::cout << "successfully setup db tables" << std::endl;
     } catch (const std::exception &e) {
-        std::cout << "Error settup up db tables: " << e.what() << std::endl;
+        std::cout << "Error setup db tables: " << e.what() << std::endl;
         return nullptr;
     }
     
