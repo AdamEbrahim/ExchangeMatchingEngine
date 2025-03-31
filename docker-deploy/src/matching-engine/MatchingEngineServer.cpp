@@ -21,7 +21,7 @@ MatchingEngineServer::~MatchingEngineServer() {
 
 //start accepting connections on port
 void MatchingEngineServer::start_accept() {
-    TcpConnection::ptr new_connection = TcpConnection::create(io_context_);
+    TcpConnection::ptr new_connection = TcpConnection::create(io_context_, db);
 
     boost::asio::ip::tcp::socket& sock = new_connection->socket;
     // acceptor_.async_accept(sock, //async task, 1 thread in pool will call completion handler

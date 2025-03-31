@@ -3,13 +3,14 @@
 #include <sstream>
 #include "tinyxml2.h"
 #include <vector>
+#include "DatabaseTransactions.h"
 
-TcpConnection::TcpConnection(boost::asio::io_context& io_context) : socket(io_context) {
+TcpConnection::TcpConnection(boost::asio::io_context& io_context, db_ptr db) : socket(io_context), C(db) {
 
 }
 
-TcpConnection::ptr TcpConnection::create(boost::asio::io_context& io_context) {
-    return TcpConnection::ptr(new TcpConnection(io_context)); //shared ptr
+TcpConnection::ptr TcpConnection::create(boost::asio::io_context& io_context, db_ptr db) {
+    return TcpConnection::ptr(new TcpConnection(io_context, db)); //shared ptr
 }
 
 void TcpConnection::start() {
@@ -22,7 +23,6 @@ void TcpConnection::start() {
 
 void TcpConnection::handle_read(const boost::system::error_code& error, size_t bytes) {
     if (error) {
-        std::cout << "error in handle read" << std::endl;
         std::cout << error.message() << std::endl;
         return;
     }
@@ -102,6 +102,15 @@ int TcpConnection::parse_message() {
                 std::cout << "id: " << id << std::endl;
                 std::cout << "balance: " << balance << std::endl;
 
+                //probably call create_account here
+                try {
+                    DatabaseTransactions::create_account(C, id, balance);
+                } catch (const pqxx::sql_error &e) {
+                    std::cout << "psql error in create_account: " << e.what() << std::endl;
+                } catch (const std::exception &e) {
+                    std::cout << "unknown exception in create_account: " << e.what() << std::endl;
+                }
+
                 
 
             } else if (std::string(element->Value()) == "symbol") {
@@ -116,6 +125,15 @@ int TcpConnection::parse_message() {
 
                     int num_shares = element2->IntText();
 
+                    //probably call insert_shares here
+                    try {
+                        DatabaseTransactions::insert_shares(C, id, symbol_name, num_shares);
+                    } catch (const pqxx::sql_error &e) {
+                        std::cout << "psql error in insert_shares: " << e.what() << std::endl;
+                    } catch (const std::exception &e) {
+                        std::cout << "unknown exception in insert_shares: " << e.what() << std::endl;
+                    }
+                    
                 }
 
 
@@ -130,6 +148,43 @@ int TcpConnection::parse_message() {
         }
 
     } else if (std::string(root->Value()) == "transactions") {
+        uint32_t id = 0;
+        root->ToElement()->QueryUnsignedAttribute("id", &id);
+
+        for (tinyxml2::XMLElement* element = root->FirstChildElement(); element != nullptr; element = element->NextSiblingElement()) {
+
+            if (std::string(element->Value()) == "order") {
+                const char* sym = nullptr;
+                element->QueryStringAttribute("sym", &sym);
+                std::string symbol_name (sym);
+
+                int amount = 0;
+                float limit = 0;
+                element->QueryIntAttribute("amount", &amount);
+                element->QueryFloatAttribute("limit", &limit);
+
+                DatabaseTransactions::place_order(C, id, symbol_name, amount, limit);
+
+
+            } else if (std::string(element->Value()) == "query") {
+                int order_id = 0;
+                element->QueryIntAttribute("id", &order_id);
+
+                DatabaseTransactions::query_order(C, id, order_id);
+
+
+            } else if (std::string(element->Value()) == "cancel") {
+                int order_id = 0;
+                element->QueryIntAttribute("id", &order_id);
+
+                DatabaseTransactions::cancel_order(C, id, order_id);
+
+            } else {
+                std::cout << "received invalid element in transactions" << std::endl;
+                break;
+            }
+    
+        }
 
     } else {
         std::cout << "received invalid root element: must be create or transaction" << std::endl;

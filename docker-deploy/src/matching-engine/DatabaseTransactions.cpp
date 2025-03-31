@@ -78,13 +78,46 @@ pqxx::connection* DatabaseTransactions::connect() {
     return C;
 }
 
-int DatabaseTransactions::create_account(uint32_t account_id, float start_balance) {
-    return 1;
-
-
+int DatabaseTransactions::create_account(db_ptr C, uint32_t account_id, float start_balance) {
+    pqxx::work W(*C);
+    
+    W.exec_params("INSERT INTO Accounts (account_id, balance) VALUES ($1, $2);",
+                    account_id, start_balance);
+    
+    W.commit();
+    return 1; //success if didn't throw (should get caught in caller)
 }
 
 //only support inserting int number of shares, might need to extend to partial shares?
-int DatabaseTransactions::insert_shares(uint32_t account_id, std::string symbol, int amount) {
+int DatabaseTransactions::insert_shares(db_ptr C, uint32_t account_id, std::string& symbol, int amount) {
+    pqxx::work W(*C);
+    
+    //insert new holding or update existing one
+    W.exec_params("INSERT INTO Holdings (account_id, symbol, amount) "
+                "VALUES ($1, $2, $3) "
+                "ON CONFLICT (account_id, symbol) "
+                "DO UPDATE SET amount = Holdings.amount + EXCLUDED.amount;",
+                account_id, symbol, amount);
+
+    W.commit();
+    return 1;
+}
+
+
+int DatabaseTransactions::place_order(db_ptr C, uint32_t account_id, std::string& symbol, int amount, float limit) {
+    return 1;
+}
+
+int DatabaseTransactions::query_order(db_ptr C, uint32_t account_id, int order_id) {
+    return 1;
+}
+
+int DatabaseTransactions::cancel_order(db_ptr C, uint32_t account_id,int order_id) {
+    return 1;
+}
+
+//function to actually match orders after placing a new order
+//should probably be part of the same transaction as place_order?
+int DatabaseTransactions::perform_match(db_ptr C, std::string& symbol) {
     return 1;
 }
