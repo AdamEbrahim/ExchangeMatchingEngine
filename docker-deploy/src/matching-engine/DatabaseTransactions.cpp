@@ -310,80 +310,88 @@ std::vector<pqxx::result> DatabaseTransactions::query_order(db_ptr C, uint32_t a
     );
     res.push_back(orderRes);
 
+    W.commit();
+
     return res;
 
 }
 
-int DatabaseTransactions::cancel_order(db_ptr C, uint32_t account_id,int order_id) {
+std::vector<pqxx::result> DatabaseTransactions::cancel_order(db_ptr C, uint32_t account_id,int order_id) {
     pqxx::work W(*C);
 
-    //lock order row
+    //check if account exists; not going to be updating account table so no lock
     pqxx::result orderRes = W.exec_params(
-        "SELECT open_shares, limit_price, symbol FROM Orders "
+        "SELECT balance FROM Accounts WHERE account_id = $1;",
+        account_id
+    );
+
+    if (orderRes.empty()) {
+        throw CustomException("Account does not exist.");
+    }
+
+    //lock order row
+    orderRes = W.exec_params(
+        "SELECT * FROM Orders "
         "WHERE order_id = $1 AND account_id = $2 FOR UPDATE",
         order_id, account_id
     );
 
     if (orderRes.empty()) {
-        std::cerr << "Order not found or does not belong to account\n";
-        return -1;
+        throw CustomException("Transaction with given id does not exist.");
     }
+
+    std::vector<pqxx::result> res;
 
     int openShares = orderRes[0]["open_shares"].as<int>();
     float limitPrice = orderRes[0]["limit_price"].as<float>();
     std::string symbol = orderRes[0]["symbol"].as<std::string>();
 
     if (openShares == 0) {
-        std::cerr << "Order already fully executed or canceled\n";
-        return -1;
+        throw CustomException("Transaction already fully executed or canceled.");
     }
 
-    // Step 2: Lock the account row for refunding
-    pqxx::result accountRes = W.exec_params(
-        "SELECT balance FROM Accounts WHERE account_id = $1 FOR UPDATE",
-        account_id
-    );
-
-    if (accountRes.empty()) {
-        std::cerr << "Account not found\n";
-        return -1;
-    }
-
-    float currentBalance = accountRes[0]["balance"].as<float>();
-
-    // Step 3: Lock the position row (if order was a sell order)
-    pqxx::result positionRes;
-    if (limitPrice < 0) {  // Negative limitPrice means it's a sell order
-        positionRes = W.exec_params(
-            "SELECT shares FROM Positions WHERE account_id = $1 AND symbol = $2 FOR UPDATE",
-            account_id, symbol
-        );
-
-        if (positionRes.empty()) {
-            std::cerr << "Position not found for this sell order\n";
-            return -1;
-        }
-    }
-
-    // Step 4: Process refund & cancel order
-    if (limitPrice > 0) {  // Buy order: refund money
-        float refundAmount = openShares * limitPrice;
-        W.exec_params("UPDATE Accounts SET balance = balance + $1 WHERE account_id = $2",
-                      refundAmount, account_id);
-    } else {  // Sell order: refund shares
+    if (openShares > 0) { //buy
+        //refund balance, will wait for lock
         W.exec_params(
-            "UPDATE Positions SET shares = shares + $1 WHERE account_id = $2 AND symbol = $3",
-            openShares, account_id, symbol
+            "UPDATE Accounts SET balance = balance + $1 WHERE account_id = $2;",
+            openShares * limitPrice, account_id
         );
+
+
+    } else { //sell
+        //refund shares, will wait for lock
+        W.exec_params(
+            "INSERT INTO Holdings (account_id, symbol, amount) VALUES ($1, $2, $3) "
+            "ON CONFLICT (account_id, symbol) DO UPDATE SET amount = Holdings.amount + EXCLUDED.amount;",
+            account_id, symbol, openShares
+        );
+
     }
 
-    // Step 5: Mark order as canceled
-    W.exec_params(
-        "UPDATE Orders SET open_shares = 0 WHERE order_id = $1",
+    //since order row locked, no new executed trades can be inserted for it, no locking needed
+    orderRes = W.exec_params(
+        "SELECT trade_id, traded_shares, price, timestamp "
+        "FROM Trades WHERE buy_order_id = $1 OR sell_order_id = $1;",
         order_id
     );
 
-    W.commit(); // Atomic commit
 
-    return 1;
+    //update order to reflect as cancelled, update timestamp
+    W.exec_params(
+        "UPDATE Orders SET open_shares = 0, timestamp = now() WHERE order_id = $1;",
+        order_id
+    );
+
+    pqxx::result orderRes2 = W.exec_params(
+        "SELECT original_shares, open_shares, limit_price, timestamp FROM Orders "
+        "WHERE order_id = $1;",
+        order_id
+    );
+
+    res.push_back(orderRes2);
+    res.push_back(orderRes);
+
+    W.commit();
+
+    return res;
 }

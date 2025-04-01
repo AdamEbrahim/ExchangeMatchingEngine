@@ -16,7 +16,7 @@ public:
 
     static std::vector<pqxx::result> query_order(db_ptr C, uint32_t account_id, int order_id);
 
-    static int cancel_order(db_ptr C, uint32_t account_id,int order_id);
+    static std::vector<pqxx::result> cancel_order(db_ptr C, uint32_t account_id,int order_id);
 
 };
 

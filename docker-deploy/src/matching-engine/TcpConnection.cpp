@@ -327,7 +327,66 @@ int TcpConnection::parse_message() {
                 int order_id = 0;
                 element->QueryIntAttribute("id", &order_id);
 
-                DatabaseTransactions::cancel_order(C, id, order_id);
+                std::string error_message;
+                std::vector<pqxx::result> orderRes;
+                try {
+                    orderRes = DatabaseTransactions::cancel_order(C, id, order_id); //vector with 2 pqxx::result elements
+                    
+                } catch (const CustomException& e) {
+                    std::cout << "psql error in query_order: " << e.what() << std::endl;
+                    error_message = e.what();
+                } catch (const std::exception &e) {
+                    std::cout << "unknown exception in query_order: " << e.what() << std::endl;
+                    error_message = "Unexpected error."; //general exception handling
+                }
+
+                tinyxml2::XMLElement* child;
+                if (error_message.empty()) {
+                    child = responseDoc.NewElement("canceled");
+
+                } else {
+                    child = responseDoc.NewElement("error");
+
+                    child->SetAttribute("id", order_id);
+                    child->SetText(error_message.c_str());
+                    respRoot->InsertEndChild(child);
+                    continue;
+                }
+
+                child->SetAttribute("id", order_id);
+                respRoot->InsertEndChild(child);
+
+                //canceled, and executed elements
+                pqxx::result orderEntry = orderRes[0];
+                pqxx::result tradesEntry = orderRes[1];
+
+                int originalShares = orderEntry[0]["original_shares"].as<int>();
+                std::string timestamp2 = orderEntry[0]["timestamp"].as<std::string>();
+
+                int totalExecuted = 0;
+                for (const auto& row : tradesEntry) { //can have multiple exectued trades
+                    int tradeId = row["trade_id"].as<int>();
+                    int tradedShares = row["traded_shares"].as<int>();
+                    float price = row["price"].as<float>();
+                    std::string timestamp = row["timestamp"].as<std::string>();
+
+                    tinyxml2::XMLElement* child2 = responseDoc.NewElement("executed");
+                    child2->SetAttribute("shares", tradedShares);
+                    child2->SetAttribute("price", price);
+                    child2->SetAttribute("time", timestamp.c_str());
+
+                    child->InsertEndChild(child2);
+
+
+                    totalExecuted += tradedShares;
+                
+                }
+
+                int canceled = originalShares - totalExecuted;
+                tinyxml2::XMLElement* child3 = responseDoc.NewElement("canceled");
+                child3->SetAttribute("shares", canceled);
+                child3->SetAttribute("time", timestamp2.c_str()); //timestamp in orders will be updated if cancel an order
+                child->InsertEndChild(child3);
 
             } else {
                 std::cout << "received invalid element in transactions" << std::endl;
