@@ -4,6 +4,7 @@
 #include "tinyxml2.h"
 #include <vector>
 #include "DatabaseTransactions.h"
+#include "CustomException.h"
 
 TcpConnection::TcpConnection(boost::asio::io_context& io_context, db_ptr db) : socket(io_context), C(db) {
 
@@ -215,36 +216,36 @@ int TcpConnection::parse_message() {
                 element->QueryFloatAttribute("limit", &limit);
 
                 std::string error_message;
+                int order_id = 0;
                 try {
-                    DatabaseTransactions::place_order(C, id, symbol_name, amount, limit);
+                    order_id = DatabaseTransactions::place_order(C, id, symbol_name, amount, limit);
                     
-                } catch (const pqxx::sql_error &e) {
+                } catch (const CustomException& e) {
                     std::cout << "psql error in place_order: " << e.what() << std::endl;
                     error_message = e.what();
                 } catch (const std::exception &e) {
                     std::cout << "unknown exception in place_order: " << e.what() << std::endl;
-                    error_message = e.what();
+                    error_message = "Unexpected error."; //general exception handling
                 }
 
                 tinyxml2::XMLElement* child;
                 if (error_message.empty()) {
                     child = responseDoc.NewElement("opened");
+
+                    child->SetAttribute("sym", sym);
+                    child->SetAttribute("amount", amount);
+                    child->SetAttribute("limit", limit);
+                    child->SetAttribute("id", order_id);
                 } else {
                     child = responseDoc.NewElement("error");
 
-                    if (error_message.find("violates foreign key constraint") != std::string::npos) {
-                        error_message = "Account does not exist.";
-                    } else if (error_message.find("violates check constraint") != std::string::npos) {
-                        error_message = "Number of shares cannot be negative.";
-                    } else {
-                        error_message = "Unexpected error."; //general exception handling
-                    }
+                    child->SetAttribute("sym", sym);
+                    child->SetAttribute("amount", amount);
+                    child->SetAttribute("limit", limit);
 
                     child->SetText(error_message.c_str());
                 }
 
-                child->SetAttribute("sym", sym);
-                child->SetAttribute("id", id);
                 respRoot->InsertEndChild(child);
 
 
@@ -252,7 +253,74 @@ int TcpConnection::parse_message() {
                 int order_id = 0;
                 element->QueryIntAttribute("id", &order_id);
 
-                DatabaseTransactions::query_order(C, id, order_id);
+                std::string error_message;
+                std::vector<pqxx::result> orderRes;
+                try {
+                    orderRes = DatabaseTransactions::query_order(C, id, order_id); //vector with 2 pqxx::result elements
+                    
+                } catch (const CustomException& e) {
+                    std::cout << "psql error in query_order: " << e.what() << std::endl;
+                    error_message = e.what();
+                } catch (const std::exception &e) {
+                    std::cout << "unknown exception in query_order: " << e.what() << std::endl;
+                    error_message = "Unexpected error."; //general exception handling
+                }
+
+                tinyxml2::XMLElement* child;
+                if (error_message.empty()) {
+                    child = responseDoc.NewElement("status");
+
+                } else {
+                    child = responseDoc.NewElement("error");
+
+                    child->SetAttribute("id", order_id);
+                    child->SetText(error_message.c_str());
+                    respRoot->InsertEndChild(child);
+                    continue;
+                }
+
+                child->SetAttribute("id", order_id);
+                respRoot->InsertEndChild(child);
+
+                //set open, canceled, and executed elements
+                pqxx::result orderEntry = orderRes[0];
+                pqxx::result tradesEntry = orderRes[1];
+
+                int originalShares = orderEntry[0]["original_shares"].as<int>();
+                int openShares = orderEntry[0]["open_shares"].as<int>();
+                float limitPrice = orderEntry[0]["limit_price"].as<float>();
+                std::string timestamp2 = orderEntry[0]["timestamp"].as<std::string>();
+
+                tinyxml2::XMLElement* child4 = responseDoc.NewElement("open");
+                child4->SetAttribute("shares", openShares);
+                child->InsertEndChild(child4);
+
+                int totalExecuted = 0;
+                for (const auto& row : tradesEntry) { //can have multiple exectued trades
+                    int tradeId = row["trade_id"].as<int>();
+                    int tradedShares = row["traded_shares"].as<int>();
+                    float price = row["price"].as<float>();
+                    std::string timestamp = row["timestamp"].as<std::string>();
+
+                    tinyxml2::XMLElement* child2 = responseDoc.NewElement("executed");
+                    child2->SetAttribute("shares", tradedShares);
+                    child2->SetAttribute("price", price);
+                    child2->SetAttribute("time", timestamp.c_str());
+
+                    child->InsertEndChild(child2);
+
+
+                    totalExecuted += tradedShares;
+                
+                }
+
+                int canceled = originalShares - openShares - totalExecuted;
+                if (canceled != 0) {
+                    tinyxml2::XMLElement* child3 = responseDoc.NewElement("canceled");
+                    child3->SetAttribute("shares", canceled);
+                    child3->SetAttribute("time", timestamp2.c_str()); //timestamp in orders will be updated if cancel an order
+                    child->InsertEndChild(child3);
+                }
 
 
             } else if (std::string(element->Value()) == "cancel") {

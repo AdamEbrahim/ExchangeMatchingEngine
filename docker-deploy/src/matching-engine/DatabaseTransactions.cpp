@@ -2,6 +2,8 @@
 #include <pqxx/pqxx>
 #include <exception>
 #include <iostream>
+#include "CustomException.h"
+#include <algorithm>
 
 pqxx::connection* DatabaseTransactions::connect() {
     pqxx::connection* C;
@@ -91,33 +93,297 @@ int DatabaseTransactions::create_account(db_ptr C, uint32_t account_id, float st
 //only support inserting int number of shares, might need to extend to partial shares?
 int DatabaseTransactions::insert_shares(db_ptr C, uint32_t account_id, std::string& symbol, int amount) {
     pqxx::work W(*C);
-    
-    //insert new holding or update existing one
-    W.exec_params("INSERT INTO Holdings (account_id, symbol, amount) "
-                "VALUES ($1, $2, $3) "
-                "ON CONFLICT (account_id, symbol) "
-                "DO UPDATE SET amount = Holdings.amount + EXCLUDED.amount;",
-                account_id, symbol, amount);
+
+    pqxx::result holdingRes = W.exec_params(
+        "SELECT amount FROM Holdings WHERE account_id = $1 AND symbol = $2 FOR UPDATE;", //make sure to acquire row lock
+        account_id, symbol
+    );
+
+    if (holdingRes.empty()) {
+        W.exec_params("INSERT INTO Holdings (account_id, symbol, amount) "
+                        "VALUES ($1, $2, $3);",
+                        account_id, symbol, amount);
+    } else {
+        W.exec_params("UPDATE Holdings SET amount = amount + $1 "
+                        "WHERE account_id = $2 AND symbol = $3;",
+                        amount, account_id, symbol);
+    }
 
     W.commit();
     return 1;
 }
 
-
+//ensures order is opened and balance/current holdings are updated atomically using row level lock
 int DatabaseTransactions::place_order(db_ptr C, uint32_t account_id, std::string& symbol, int amount, float limit) {
-    return 1;
+    pqxx::work W(*C);
+
+    pqxx::result res;
+    if (amount >= 0) { //buy; just handle orders of 0 as well
+
+        //make sure balance is enough
+        res = W.exec_params(
+            "SELECT balance FROM Accounts WHERE account_id = $1 FOR UPDATE;", //lock
+            account_id
+        );
+
+        if (res.empty()) {
+            throw CustomException("Account does not exist.");
+        }
+
+        float curr_balance = res[0]["balance"].as<float>();
+
+        if (curr_balance < limit * amount) {
+            throw CustomException("Insufficient balance.");
+        }
+
+        //can release lock and update as we have guaranteed have resources
+        W.exec_params(
+            "UPDATE Accounts SET balance = balance - $1 WHERE account_id = $2;",
+            limit * amount, account_id
+        );
+
+    } else { //sell
+        //check if account exists; not going to be updating account table so no lock
+        res = W.exec_params(
+            "SELECT balance FROM Accounts WHERE account_id = $1;",
+            account_id
+        );
+
+        if (res.empty()) {
+            throw CustomException("Account does not exist.");
+        }
+
+        //make sure current shares is enough to sell
+        res = W.exec_params(
+            "SELECT amount FROM Holdings WHERE account_id = $1 AND symbol = $2 FOR UPDATE;", //lock
+            account_id, symbol
+        );
+
+        if (res.empty()) {
+            throw CustomException("Account does not own shares of this symbol.");
+        }
+
+        int curr_amount = res[0]["amount"].as<int>();
+
+        if (curr_amount < amount) {
+            throw CustomException("Insufficient currently owned shares of this symbol.");
+        }
+
+        //can release lock and update as we have guaranteed have resources
+        W.exec_params(
+            "UPDATE Holdings SET amount = amount - $1 WHERE account_id = $2 AND symbol = $3;",
+            amount, account_id, symbol
+        );
+
+    }
+
+    //create new order
+    res = W.exec_params("INSERT INTO Orders (account_id, symbol, original_shares, open_shares, limit_price) "
+        "VALUES ($1, $2, $3, $4, $5) RETURNING order_id;",
+        account_id, symbol, amount, amount, limit);
+    int order_id = res[0][0].as<int>(); //store newly created order id so we can return it
+
+
+    //do matching; order by order_id to create consistent order of row level locks in FOR UPDATE to prevent deadlock
+    res = W.exec_params(
+        "SELECT * FROM Orders "
+        "WHERE symbol = $1 AND open_shares > 0 "
+        "ORDER BY order_id ASC FOR UPDATE;",  //Consistent order by order_id
+        symbol);
+
+    //buy and sell lists
+    std::vector<pqxx::row> buy_orders, sell_orders;
+    for (const auto& row : res) {
+        int open_shares = row["open_shares"].as<int>();
+
+        if (open_shares > 0) {
+            buy_orders.push_back(row);
+        } else {
+            sell_orders.push_back(row);
+        }
+    }
+
+    //sort buy orders: highest limit price first, break ties with earliest timestamp
+    std::sort(buy_orders.begin(), buy_orders.end(), [](const pqxx::row& a, const pqxx::row& b) {
+        double priceA = a["limit_price"].as<double>();
+        double priceB = b["limit_price"].as<double>();
+        return (priceA > priceB) || (priceA == priceB && a["timestamp"].as<std::string>() < b["timestamp"].as<std::string>());
+    });
+
+    //sort sell orders: lowest limit price first, break ties with earliest timestamp
+    std::sort(sell_orders.begin(), sell_orders.end(), [](const pqxx::row& a, const pqxx::row& b) {
+        double priceA = a["limit_price"].as<double>();
+        double priceB = b["limit_price"].as<double>();
+        return (priceA < priceB) || (priceA == priceB && a["timestamp"].as<std::string>() < b["timestamp"].as<std::string>());
+    });
+
+    int buy_index = 0, sell_index = 0;
+    while (buy_index < buy_orders.size() && sell_index < sell_orders.size()) {
+        pqxx::row& buy = buy_orders[buy_index];
+        pqxx::row& sell = sell_orders[sell_index];
+
+        int buy_id = buy["order_id"].as<int>();
+        int sell_id = sell["order_id"].as<int>();
+        int buyer_account = buy["account_id"].as<int>();
+        int seller_account = sell["account_id"].as<int>();
+        int buy_shares = buy["open_shares"].as<int>();
+        int sell_shares = -sell["open_shares"].as<int>();
+        double buy_price = buy["limit_price"].as<double>();
+        double sell_price = sell["limit_price"].as<double>();
+        std::string buy_time = buy["timestamp"].as<std::string>();
+        std::string sell_time = sell["timestamp"].as<std::string>();
+
+        if (buy_price < sell_price) {
+            break; //no more possible matches
+        }
+
+        double exec_price = (buy_time < sell_time) ? buy_price : sell_price;
+
+        int trade_shares = std::min(buy_shares, sell_shares);
+
+        //update buyer; no concurrency issues as if any other transaction holds the lock this will pause on update
+        W.exec_params(
+            "INSERT INTO Holdings (account_id, symbol, amount) VALUES ($1, $2, $3) "
+            "ON CONFLICT (account_id, symbol) DO UPDATE SET amount = Holdings.amount + EXCLUDED.amount;",
+            buyer_account, symbol, trade_shares
+        );
+
+        //update seller; no concurrency issues as if any other transaction holds the lock this will pause
+        W.exec_params(
+            "UPDATE Accounts SET balance = balance + $1 WHERE account_id = $2;",
+            trade_shares * exec_price, seller_account
+        );
+
+        //update orders
+        W.exec_params("UPDATE Orders SET open_shares = open_shares - $1 WHERE order_id = $2;", trade_shares, buy_id);
+        W.exec_params("UPDATE Orders SET open_shares = open_shares + $1 WHERE order_id = $2;", trade_shares, sell_id);
+
+        //insert trade
+        W.exec_params(
+            "INSERT INTO Trades (buy_order_id, sell_order_id, symbol, shares, price) "
+            "VALUES ($1, $2, $3, $4, $5);",
+            buy_id, sell_id, symbol, trade_shares, exec_price
+        );
+
+        //move pointer
+        if (trade_shares == buy_shares) buy_index++;
+        if (trade_shares == sell_shares) sell_index++;
+    }
+
+    W.commit(); //lock released on all rows, another thread trying to run matching can continue
+
+    return order_id;
 }
 
-int DatabaseTransactions::query_order(db_ptr C, uint32_t account_id, int order_id) {
-    return 1;
+std::vector<pqxx::result> DatabaseTransactions::query_order(db_ptr C, uint32_t account_id, int order_id) {
+    pqxx::work W(*C);
+
+    //check if account exists; not going to be updating account table so no lock
+    pqxx::result orderRes = W.exec_params(
+        "SELECT balance FROM Accounts WHERE account_id = $1;",
+        account_id
+    );
+
+    if (orderRes.empty()) {
+        throw CustomException("Account does not exist.");
+    }
+
+    //check if order exists and belongs to the account, lock order row
+    orderRes = W.exec_params(
+        "SELECT original_shares, open_shares, limit_price, timestamp FROM Orders "
+        "WHERE order_id = $1 AND account_id = $2 FOR UPDATE;",
+        order_id, account_id
+    );
+
+    if (orderRes.empty()) {
+        throw CustomException("Transaction with given id does not exist.");
+    }
+
+    std::vector<pqxx::result> res;
+    res.push_back(orderRes);
+
+    //since order row locked, no new executed trades can be inserted for it, no locking needed
+    orderRes = W.exec_params(
+        "SELECT trade_id, traded_shares, price, timestamp "
+        "FROM Trades WHERE buy_order_id = $1 OR sell_order_id = $1",
+        order_id
+    );
+    res.push_back(orderRes);
+
+    return res;
+
 }
 
 int DatabaseTransactions::cancel_order(db_ptr C, uint32_t account_id,int order_id) {
-    return 1;
-}
+    pqxx::work W(*C);
 
-//function to actually match orders after placing a new order
-//should probably be part of the same transaction as place_order?
-int DatabaseTransactions::perform_match(db_ptr C, std::string& symbol) {
+    //lock order row
+    pqxx::result orderRes = W.exec_params(
+        "SELECT open_shares, limit_price, symbol FROM Orders "
+        "WHERE order_id = $1 AND account_id = $2 FOR UPDATE",
+        order_id, account_id
+    );
+
+    if (orderRes.empty()) {
+        std::cerr << "Order not found or does not belong to account\n";
+        return -1;
+    }
+
+    int openShares = orderRes[0]["open_shares"].as<int>();
+    float limitPrice = orderRes[0]["limit_price"].as<float>();
+    std::string symbol = orderRes[0]["symbol"].as<std::string>();
+
+    if (openShares == 0) {
+        std::cerr << "Order already fully executed or canceled\n";
+        return -1;
+    }
+
+    // Step 2: Lock the account row for refunding
+    pqxx::result accountRes = W.exec_params(
+        "SELECT balance FROM Accounts WHERE account_id = $1 FOR UPDATE",
+        account_id
+    );
+
+    if (accountRes.empty()) {
+        std::cerr << "Account not found\n";
+        return -1;
+    }
+
+    float currentBalance = accountRes[0]["balance"].as<float>();
+
+    // Step 3: Lock the position row (if order was a sell order)
+    pqxx::result positionRes;
+    if (limitPrice < 0) {  // Negative limitPrice means it's a sell order
+        positionRes = W.exec_params(
+            "SELECT shares FROM Positions WHERE account_id = $1 AND symbol = $2 FOR UPDATE",
+            account_id, symbol
+        );
+
+        if (positionRes.empty()) {
+            std::cerr << "Position not found for this sell order\n";
+            return -1;
+        }
+    }
+
+    // Step 4: Process refund & cancel order
+    if (limitPrice > 0) {  // Buy order: refund money
+        float refundAmount = openShares * limitPrice;
+        W.exec_params("UPDATE Accounts SET balance = balance + $1 WHERE account_id = $2",
+                      refundAmount, account_id);
+    } else {  // Sell order: refund shares
+        W.exec_params(
+            "UPDATE Positions SET shares = shares + $1 WHERE account_id = $2 AND symbol = $3",
+            openShares, account_id, symbol
+        );
+    }
+
+    // Step 5: Mark order as canceled
+    W.exec_params(
+        "UPDATE Orders SET open_shares = 0 WHERE order_id = $1",
+        order_id
+    );
+
+    W.commit(); // Atomic commit
+
     return 1;
 }
