@@ -31,16 +31,7 @@ void TcpConnection::handle_read(const boost::system::error_code& error, size_t b
     message += std::string(buffer, bytes);
 
     //do some computation on the message
-    if (parse_message() < 0) {
-        auto self = shared_from_this(); //creates new shared_ptr to increase ref count until async_read finishes
-
-        //async task to read from a socket, once gets data over socket will dispatch a thread to do completion handler
-        socket.async_read_some(boost::asio::buffer(buffer),
-            [self](const boost::system::error_code& error, size_t bytes) {self->handle_read(error, bytes);});
-        return;
-
-    }
-    //have full message
+    parse_message();
 
     auto self = shared_from_this(); //creates new shared_ptr to increase ref count until async_read finishes
 
@@ -51,7 +42,7 @@ void TcpConnection::handle_read(const boost::system::error_code& error, size_t b
 
 }
 
-//return -1 if incomplete message
+
 int TcpConnection::parse_message() {
     if (message.find("\n") == std::string::npos) {
         return -1;
@@ -64,7 +55,7 @@ int TcpConnection::parse_message() {
     uint32_t xml_len = std::stoul(line);
     int xml_start = line.length() + 1; //index of start of xml
 
-    if (xml_start + xml_len < message.length()) { //haven't received full XML
+    if (xml_start + xml_len > message.length()) { //haven't received full XML
         std::cout << "haven received full xml" << std::endl;
         return -1;
     }

@@ -171,7 +171,7 @@ int DatabaseTransactions::place_order(db_ptr C, uint32_t account_id, std::string
 
         //can release lock and update as we have guaranteed have resources
         W.exec_params(
-            "UPDATE Holdings SET amount = amount - $1 WHERE account_id = $2 AND symbol = $3;",
+            "UPDATE Holdings SET amount = amount + $1 WHERE account_id = $2 AND symbol = $3;",
             amount, account_id, symbol
         );
 
@@ -363,7 +363,7 @@ std::vector<pqxx::result> DatabaseTransactions::cancel_order(db_ptr C, uint32_t 
         W.exec_params(
             "INSERT INTO Holdings (account_id, symbol, amount) VALUES ($1, $2, $3) "
             "ON CONFLICT (account_id, symbol) DO UPDATE SET amount = Holdings.amount + EXCLUDED.amount;",
-            account_id, symbol, openShares
+            account_id, symbol, openShares * -1
         );
 
     }
