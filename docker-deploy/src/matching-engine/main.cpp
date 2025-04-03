@@ -10,6 +10,8 @@
 #define SERVER_PORT 12345
 
 int main() {
+    std::cout << "PID: " << getpid() << std::endl;
+
     try {
         boost::asio::io_context io_context;
 
