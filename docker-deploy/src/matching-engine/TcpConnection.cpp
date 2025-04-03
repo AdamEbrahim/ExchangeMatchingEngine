@@ -396,10 +396,12 @@ int TcpConnection::parse_message() {
     tinyxml2::XMLPrinter printer;
     responseDoc.Print(&printer);
     std::string responseString = printer.CStr();
+    responseString = std::to_string(responseString.size()) + "\n" + responseString; //add length of xml to start
 
     // send the result back to the client
     boost::asio::write(socket, boost::asio::buffer(responseString.c_str(), responseString.length()));
 
+    //can remove when doing load testing
     std::cout << "response xml: " << std::endl;
     std::cout << responseString << std::endl;
 

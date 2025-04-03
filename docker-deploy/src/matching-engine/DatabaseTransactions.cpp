@@ -4,19 +4,28 @@
 #include <iostream>
 #include "CustomException.h"
 #include <algorithm>
+#include <thread>
+#include <chrono>
 
 pqxx::connection* DatabaseTransactions::connect() {
     pqxx::connection* C;
-    try {
-        C = new pqxx::connection("dbname=postgres user=postgres password=postgres host=db port=5432");
-        if (!C->is_open()) {
-            std::cout << "Error: cant open db" << std::endl;
-            return nullptr;
-        }
 
-    } catch (std::exception& e) {
-        std::cout << e.what() << std::endl;
-        return nullptr;
+    //try to connect to db up to 10 times (gives time for db service to setup)
+    int connection_attempt = 0;
+    while (connection_attempt < 10) {
+        try {
+            C = new pqxx::connection("dbname=postgres user=postgres password=postgres host=db port=5432");
+            break; //if got here, no error when connection to db
+            // if (!C->is_open()) {
+            //     std::cout << "Error: cant open db" << std::endl;
+            //     return nullptr;
+            // }
+
+        } catch (std::exception& e) {
+            //std::cout << e.what() << std::endl;
+            std::this_thread::sleep_for(std::chrono::seconds(1)); //1 second sleep of thread (main thread)
+        }
+        connection_attempt++;
     }
 
     std::cout << "successfully connected to db" << std::endl;
