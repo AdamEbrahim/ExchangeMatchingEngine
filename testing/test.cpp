@@ -15,23 +15,28 @@ void send_request(int sock, const std::string& request) {
         close(sock);
         exit(1);
     }
-    // std::cout << "Sent:\n" << message << std::endl;
+    std::cout << "Sent (" << message.size() << " bytes):\n" << request << std::endl;
 }
 
 void receive_response(int sock) {
-    char buff[1000];
-    int bytes_received = read(sock, buff, 1000);
+    char buff[4096];
+    int bytes_received = read(sock, buff, sizeof(buff) - 1);
     if (bytes_received > 0) {
         buff[bytes_received] = '\0';
-        // std::cout << "Received:\n" << buff << std::endl;
+        std::cout << "Received (" << bytes_received << " bytes):\n" << buff << std::endl;
+    } else {
+        std::cerr << "No response received or read failed.\n";
     }
+    std::cout << "--------------------------------------\n";
 }
 
 int main(int argc, char * argv[]) {
     if (argc != 3) {
-        std::cout << "usage: ./test <account _id> <number of requests>" << std::endl;
+        std::cout << "usage: ./test <account_id> <number_of_requests>\n";
         return EXIT_FAILURE;
     }
+    std::string aid = argv[1];
+    int request_num = std::stoi(argv[2]);
 
     int sock = socket(AF_INET, SOCK_STREAM, 0);
     if (sock == -1) {
@@ -54,42 +59,45 @@ int main(int argc, char * argv[]) {
         return 1;
     }
 
-    //Test Create Account
-    std::string aid = argv[1];
+    // create account and add shares
     std::string create_request =
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
         "<create>\n"
-        "<account id=\"" + aid + "\" balance=\"5000\"/>\n"
-        "<symbol sym=\"AAPL\">\n"
-        "<account id=\"" + aid + "\">50</account>\n"
-        "</symbol>\n"
+        "  <account id=\"" + aid + "\" balance=\"5000\"/>\n"
+        "  <symbol sym=\"AAPL\">\n"
+        "    <account id=\"" + aid + "\">50</account>\n"
+        "  </symbol>\n"
         "</create>\n";
+
     send_request(sock, create_request);
     receive_response(sock);
 
-    // Test Transactions (Order and Query)
-    int request_num = std::stoi(argv[2]);
-    int amt;
-    int lim;
+    int remaining_shares = 50;
+    // send transaction requests
     for (int i = 0; i < request_num; i++) {
-        amt = 10;
-        amt += rand() % 10;
-        if (rand() % 2 == 0) {
+        int amt = 10 + rand() % 10;
+        // if (rand() % 2 == 0) amt *= -1;
+        int lim = 95 + rand() % 10;
+
+
+        if (std::stoi(aid) % 2 == 1) { // sell
+            if (amt > remaining_shares) amt = remaining_shares;
             amt *= -1;
+            remaining_shares += amt; // subtract
+            if (remaining_shares <= 0) break; // no more to sell
         }
 
-        lim = 95;
-        lim += rand() % 10;
         std::string transaction_request =
             "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
             "<transactions id=\"" + aid + "\">\n"
-            "<order sym=\"AAPL\" "
-            "amount=\"" + std::to_string(amt) + "\" limit=\"" + std::to_string(lim) + "\"/>\n"
+            "  <order sym=\"AAPL\" amount=\"" + std::to_string(amt) +
+            "\" limit=\"" + std::to_string(lim) + "\"/>\n"
             "</transactions>\n";
+
         send_request(sock, transaction_request);
         receive_response(sock);
-    } 
-    
+    }
+
     close(sock);
     return 0;
 }

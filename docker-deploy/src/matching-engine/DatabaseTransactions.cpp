@@ -170,11 +170,10 @@ int DatabaseTransactions::place_order(uint32_t account_id, std::string& symbol, 
         account_id, symbol, amount, amount, limit);
     int order_id = res[0][0].as<int>(); //store newly created order id so we can return it
 
-
     //do matching; order by order_id to create consistent order of row level locks in FOR UPDATE to prevent deadlock
     res = W.exec_params(
         "SELECT * FROM Orders "
-        "WHERE symbol = $1 AND open_shares > 0 "
+        "WHERE symbol = $1 AND open_shares != 0 "
         "ORDER BY order_id ASC FOR UPDATE;",  //Consistent order by order_id
         symbol);
 
@@ -203,6 +202,30 @@ int DatabaseTransactions::place_order(uint32_t account_id, std::string& symbol, 
         double priceB = b["limit_price"].as<double>();
         return (priceA < priceB) || (priceA == priceB && a["timestamp"].as<std::string>() < b["timestamp"].as<std::string>());
     });
+
+    std::cout << "buy list: " << std::endl;
+    for (auto& buy : buy_orders) {
+        int buy_id = buy["order_id"].as<int>();
+        int buyer_account = buy["account_id"].as<int>();
+        int buy_shares = buy["open_shares"].as<int>();
+        double buy_price = buy["limit_price"].as<double>();
+        std::string buy_time = buy["timestamp"].as<std::string>();
+
+        std::cout << buy_id << " account: " << buyer_account << " shares: " << buy_shares << " price: " << buy_price << " time: " << buy_time << std::endl;
+        
+    }
+
+    std::cout << "sell list: " << std::endl;
+    for (auto& buy : sell_orders) {
+        int buy_id = buy["order_id"].as<int>();
+        int buyer_account = buy["account_id"].as<int>();
+        int buy_shares = buy["open_shares"].as<int>();
+        double buy_price = buy["limit_price"].as<double>();
+        std::string buy_time = buy["timestamp"].as<std::string>();
+
+        std::cout << buy_id << " account: " << buyer_account << " shares: " << buy_shares << " price: " << buy_price << " time: " << buy_time << std::endl;
+        
+    }
 
     int buy_index = 0, sell_index = 0;
     while (buy_index < buy_orders.size() && sell_index < sell_orders.size()) {
@@ -247,7 +270,7 @@ int DatabaseTransactions::place_order(uint32_t account_id, std::string& symbol, 
 
         //insert trade
         W.exec_params(
-            "INSERT INTO Trades (buy_order_id, sell_order_id, symbol, shares, price) "
+            "INSERT INTO Trades (buy_order_id, sell_order_id, symbol, traded_shares, price) "
             "VALUES ($1, $2, $3, $4, $5);",
             buy_id, sell_id, symbol, trade_shares, exec_price
         );
