@@ -24,7 +24,7 @@ void TcpConnection::start() {
 
 void TcpConnection::handle_read(const boost::system::error_code& error, size_t bytes) {
     if (error) { //prob just EOF since connection closed, don't register another async_read_some
-        std::cout << error.message() << std::endl;
+        //std::cout << error.message() << std::endl;
         return;
     }
 
@@ -61,10 +61,9 @@ int TcpConnection::parse_message() {
     int xml_start = line.length() + 1; //index of start of xml
 
     if (xml_start + xml_len > message.length()) { //haven't received full XML
-        std::cout << "haven received full xml" << std::endl;
+        //std::cout << "haven received full xml" << std::endl;
         return -1;
     }
-    std::cout << "have received full xml, " << message.length() << std::endl;
     
     //extract the actual xml, so remove anything like "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
     std::getline(message_stream, line);
@@ -102,16 +101,13 @@ int TcpConnection::parse_message() {
                 element->QueryUnsignedAttribute("id", &id);
                 element->QueryFloatAttribute("balance", &balance);
 
-                std::cout << "id: " << id << std::endl;
-                std::cout << "balance: " << balance << std::endl;
-
                 std::string error_message; //used for more user-freindly error messages
                 //probably call create_account here
                 try {
                     DatabaseTransactions::create_account(id, balance);
 
                 } catch (const pqxx::sql_error &e) {
-                    std::cout << "psql error in create_account: " << e.what() << std::endl;
+                    //std::cout << "psql error in create_account: " << e.what() << std::endl;
                     error_message = e.what();
 
                 } catch (const std::exception &e) {
@@ -158,7 +154,7 @@ int TcpConnection::parse_message() {
                         DatabaseTransactions::insert_shares(id, symbol_name, num_shares);
                         
                     } catch (const pqxx::sql_error &e) {
-                        std::cout << "psql error in insert_shares: " << e.what() << std::endl;
+                        //std::cout << "psql error in insert_shares: " << e.what() << std::endl;
                         error_message = e.what();
                     } catch (const std::exception &e) {
                         std::cout << "unknown exception in insert_shares: " << e.what() << std::endl;
@@ -217,7 +213,7 @@ int TcpConnection::parse_message() {
                     order_id = DatabaseTransactions::place_order(id, symbol_name, amount, limit);
                     
                 } catch (const CustomException& e) {
-                    std::cout << "psql error in place_order: " << e.what() << std::endl;
+                    //std::cout << "psql error in place_order: " << e.what() << std::endl;
                     error_message = e.what();
                 } catch (const std::exception &e) {
                     std::cout << "unknown exception in place_order: " << e.what() << std::endl;
@@ -255,7 +251,7 @@ int TcpConnection::parse_message() {
                     orderRes = DatabaseTransactions::query_order(id, order_id); //vector with 2 pqxx::result elements
                     
                 } catch (const CustomException& e) {
-                    std::cout << "psql error in query_order: " << e.what() << std::endl;
+                    //std::cout << "psql error in query_order: " << e.what() << std::endl;
                     error_message = e.what();
                 } catch (const std::exception &e) {
                     std::cout << "unknown exception in query_order: " << e.what() << std::endl;
@@ -329,7 +325,7 @@ int TcpConnection::parse_message() {
                     orderRes = DatabaseTransactions::cancel_order(id, order_id); //vector with 2 pqxx::result elements
                     
                 } catch (const CustomException& e) {
-                    std::cout << "psql error in query_order: " << e.what() << std::endl;
+                    //std::cout << "psql error in query_order: " << e.what() << std::endl;
                     error_message = e.what();
                 } catch (const std::exception &e) {
                     std::cout << "unknown exception in query_order: " << e.what() << std::endl;
@@ -407,8 +403,8 @@ int TcpConnection::parse_message() {
     boost::asio::write(socket, boost::asio::buffer(responseString.c_str(), responseString.length()));
 
     //can remove when doing load testing
-    std::cout << "response xml: " << std::endl;
-    std::cout << responseString << std::endl;
+    // std::cout << "response xml: " << std::endl;
+    // std::cout << responseString << std::endl;
 
     message.clear();
 

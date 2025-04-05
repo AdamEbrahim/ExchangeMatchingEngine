@@ -28,7 +28,7 @@ void MatchingEngineServer::start_accept() {
 
 //a thread from pool should be dispatched to handle accepting new connection
 void MatchingEngineServer::handle_accept(TcpConnection::ptr connection, const boost::system::error_code& error) {
-    std::cout << "got new connection" << std::endl;
+    //std::cout << "got new connection" << std::endl;
     if (!error) {
         connection->start();
     }

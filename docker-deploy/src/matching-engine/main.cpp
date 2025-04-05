@@ -36,6 +36,7 @@ int main() {
                         std::this_thread::sleep_for(std::chrono::seconds(1)); //1 second sleep of thread
                     }
                 }
+                return std::shared_ptr<pqxx::connection>(nullptr); // just in case (unreachable)
             }()); //add () to call the lambda
         }
 
@@ -45,11 +46,10 @@ int main() {
 
         MatchingEngineServer server(io_context, SERVER_PORT); //constructor will call start_accept and set up async tasks/work
 
-
         //thread pool
         std::vector<std::thread> threads;
         for (int i = 1; i < THREAD_POOL_SIZE; i++) {
-            threads.emplace_back([&]{ 
+            threads.emplace_back([&, i]{ //must explicitly capture i by value (thread might start executing this lambda after i changes)
                 thread_conn = connection_pool[i]; //setting the thread local db connection variable (top of file)
                 io_context.run(); 
             });

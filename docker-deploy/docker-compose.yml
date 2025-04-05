@@ -19,5 +19,11 @@ services:
       command: sh -c "make all && ./main"
       depends_on:
         - db
+      # deploy:
+      #   resources:
+      #     limits:
+      #       cpus: '0.125'
+      #     reservations:
+      #       cpus: '0.125'
 volumes:
   data-volume:
