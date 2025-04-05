@@ -6,16 +6,16 @@
 #include "DatabaseTransactions.h"
 #include "CustomException.h"
 
-TcpConnection::TcpConnection(boost::asio::io_context& io_context, db_ptr db) : socket(io_context), C(db) {
+TcpConnection::TcpConnection(boost::asio::io_context& io_context) : socket(io_context) {
 
 }
 
-TcpConnection::ptr TcpConnection::create(boost::asio::io_context& io_context, db_ptr db) {
-    return TcpConnection::ptr(new TcpConnection(io_context, db)); //shared ptr
+TcpConnection::ptr TcpConnection::create(boost::asio::io_context& io_context) {
+    return TcpConnection::ptr(new TcpConnection(io_context)); //shared ptr
 }
 
 void TcpConnection::start() {
-    auto self = shared_from_this(); //creates new shared_ptr to increase ref count until async_read finishes
+    auto self = shared_from_this(); //creates reference to shared_ptr to increase ref count until async_read finishes
 
     //async task to read from a socket, once gets data over socket will dispatch a thread to do completion handler
     socket.async_read_some(boost::asio::buffer(buffer),
@@ -28,17 +28,22 @@ void TcpConnection::handle_read(const boost::system::error_code& error, size_t b
         return;
     }
 
-    message += std::string(buffer, bytes);
+    try {
+        message += std::string(buffer, bytes);
 
-    //do some computation on the message
-    parse_message();
+        //do some computation on the message
+        parse_message();
+
+    } catch (const std::exception& e) {
+        std::cout << "Uncaught exception in handle_read/parse_message: " << e.what() << std::endl;
+        message.clear(); //just keep going after clearing currently collected socket data
+    }
 
     auto self = shared_from_this(); //creates new shared_ptr to increase ref count until async_read finishes
 
     //async task to read from a socket, once gets data over socket will dispatch a thread to do completion handler
     socket.async_read_some(boost::asio::buffer(buffer),
         [self](const boost::system::error_code& error, size_t bytes) {self->handle_read(error, bytes);});
-    return;
 
 }
 
@@ -103,7 +108,7 @@ int TcpConnection::parse_message() {
                 std::string error_message; //used for more user-freindly error messages
                 //probably call create_account here
                 try {
-                    DatabaseTransactions::create_account(C, id, balance);
+                    DatabaseTransactions::create_account(id, balance);
 
                 } catch (const pqxx::sql_error &e) {
                     std::cout << "psql error in create_account: " << e.what() << std::endl;
@@ -150,7 +155,7 @@ int TcpConnection::parse_message() {
                     //probably call insert_shares here
                     std::string error_message;
                     try {
-                        DatabaseTransactions::insert_shares(C, id, symbol_name, num_shares);
+                        DatabaseTransactions::insert_shares(id, symbol_name, num_shares);
                         
                     } catch (const pqxx::sql_error &e) {
                         std::cout << "psql error in insert_shares: " << e.what() << std::endl;
@@ -209,7 +214,7 @@ int TcpConnection::parse_message() {
                 std::string error_message;
                 int order_id = 0;
                 try {
-                    order_id = DatabaseTransactions::place_order(C, id, symbol_name, amount, limit);
+                    order_id = DatabaseTransactions::place_order(id, symbol_name, amount, limit);
                     
                 } catch (const CustomException& e) {
                     std::cout << "psql error in place_order: " << e.what() << std::endl;
@@ -247,7 +252,7 @@ int TcpConnection::parse_message() {
                 std::string error_message;
                 std::vector<pqxx::result> orderRes;
                 try {
-                    orderRes = DatabaseTransactions::query_order(C, id, order_id); //vector with 2 pqxx::result elements
+                    orderRes = DatabaseTransactions::query_order(id, order_id); //vector with 2 pqxx::result elements
                     
                 } catch (const CustomException& e) {
                     std::cout << "psql error in query_order: " << e.what() << std::endl;
@@ -321,7 +326,7 @@ int TcpConnection::parse_message() {
                 std::string error_message;
                 std::vector<pqxx::result> orderRes;
                 try {
-                    orderRes = DatabaseTransactions::cancel_order(C, id, order_id); //vector with 2 pqxx::result elements
+                    orderRes = DatabaseTransactions::cancel_order(id, order_id); //vector with 2 pqxx::result elements
                     
                 } catch (const CustomException& e) {
                     std::cout << "psql error in query_order: " << e.what() << std::endl;

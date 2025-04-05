@@ -5,14 +5,7 @@
 #include <stdexcept>
 
 MatchingEngineServer::MatchingEngineServer(boost::asio::io_context& io_context, int port) : io_context_(io_context), acceptor_(io_context, boost::asio::ip::tcp::endpoint(boost::asio::ip::tcp::v4(), port)) {
-    //open db connection
-    pqxx::connection* C = DatabaseTransactions::connect();
-    if (C == nullptr) {
-        throw std::runtime_error("Error connecting to database");
-    }
-
-    db = db_ptr (C); //delete being called on a pqxx::connection will first call destructor which will close connection
-    start_accept(); //only 1 thread calls
+    start_accept(); //only 1 thread calls, start accepting connections
 }
 
 MatchingEngineServer::~MatchingEngineServer() {
@@ -21,7 +14,7 @@ MatchingEngineServer::~MatchingEngineServer() {
 
 //start accepting connections on port
 void MatchingEngineServer::start_accept() {
-    TcpConnection::ptr new_connection = TcpConnection::create(io_context_, db);
+    TcpConnection::ptr new_connection = TcpConnection::create(io_context_);
 
     boost::asio::ip::tcp::socket& sock = new_connection->socket;
     // acceptor_.async_accept(sock, //async task, 1 thread in pool will call completion handler

@@ -13,7 +13,7 @@ public:
     typedef std::shared_ptr<pqxx::connection> db_ptr;
     boost::asio::io_context& io_context_;
     boost::asio::ip::tcp::acceptor acceptor_;
-    db_ptr db;
+    //db_ptr db;
 
 
     MatchingEngineServer(boost::asio::io_context& io_context, int port);

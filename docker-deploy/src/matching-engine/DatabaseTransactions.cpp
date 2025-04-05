@@ -7,33 +7,13 @@
 #include <thread>
 #include <chrono>
 
-pqxx::connection* DatabaseTransactions::connect() {
-    pqxx::connection* C;
+extern thread_local std::shared_ptr<pqxx::connection> thread_conn; //make thread local db connection visible
 
-    //try to connect to db up to 10 times (gives time for db service to setup)
-    int connection_attempt = 0;
-    while (connection_attempt < 10) {
-        try {
-            C = new pqxx::connection("dbname=postgres user=postgres password=postgres host=db port=5432");
-            break; //if got here, no error when connection to db
-            // if (!C->is_open()) {
-            //     std::cout << "Error: cant open db" << std::endl;
-            //     return nullptr;
-            // }
-
-        } catch (std::exception& e) {
-            //std::cout << e.what() << std::endl;
-            std::this_thread::sleep_for(std::chrono::seconds(1)); //1 second sleep of thread (main thread)
-        }
-        connection_attempt++;
-    }
-
-    std::cout << "successfully connected to db" << std::endl;
-
+void DatabaseTransactions::setup() {
     //RESET AND SETUP TABLES HERE
     //dont think i need to setup a transaction as only 1 thread here
     try {
-        pqxx::work W(*C);
+        pqxx::work W(*thread_conn);
     
         //drop existing tables to reset
         W.exec("DROP TABLE IF EXISTS Trades CASCADE;");
@@ -82,15 +62,12 @@ pqxx::connection* DatabaseTransactions::connect() {
         std::cout << "successfully setup db tables" << std::endl;
     } catch (const std::exception &e) {
         std::cout << "Error setup db tables: " << e.what() << std::endl;
-        return nullptr;
+        throw; //propagate exception
     }
-    
-
-    return C;
 }
 
-int DatabaseTransactions::create_account(db_ptr C, uint32_t account_id, float start_balance) {
-    pqxx::work W(*C);
+int DatabaseTransactions::create_account(uint32_t account_id, float start_balance) {
+    pqxx::work W(*thread_conn);
     
     W.exec_params("INSERT INTO Accounts (account_id, balance) VALUES ($1, $2);",
                     account_id, start_balance);
@@ -100,8 +77,8 @@ int DatabaseTransactions::create_account(db_ptr C, uint32_t account_id, float st
 }
 
 //only support inserting int number of shares, might need to extend to partial shares?
-int DatabaseTransactions::insert_shares(db_ptr C, uint32_t account_id, std::string& symbol, int amount) {
-    pqxx::work W(*C);
+int DatabaseTransactions::insert_shares(uint32_t account_id, std::string& symbol, int amount) {
+    pqxx::work W(*thread_conn);
 
     pqxx::result holdingRes = W.exec_params(
         "SELECT amount FROM Holdings WHERE account_id = $1 AND symbol = $2 FOR UPDATE;", //make sure to acquire row lock
@@ -123,8 +100,8 @@ int DatabaseTransactions::insert_shares(db_ptr C, uint32_t account_id, std::stri
 }
 
 //ensures order is opened and balance/current holdings are updated atomically using row level lock
-int DatabaseTransactions::place_order(db_ptr C, uint32_t account_id, std::string& symbol, int amount, float limit) {
-    pqxx::work W(*C);
+int DatabaseTransactions::place_order(uint32_t account_id, std::string& symbol, int amount, float limit) {
+    pqxx::work W(*thread_conn);
 
     pqxx::result res;
     if (amount >= 0) { //buy; just handle orders of 0 as well
@@ -174,7 +151,8 @@ int DatabaseTransactions::place_order(db_ptr C, uint32_t account_id, std::string
 
         int curr_amount = res[0]["amount"].as<int>();
 
-        if (curr_amount < amount) {
+        //remember amount is negative since sell
+        if (curr_amount < -1 * amount) {
             throw CustomException("Insufficient currently owned shares of this symbol.");
         }
 
@@ -284,8 +262,8 @@ int DatabaseTransactions::place_order(db_ptr C, uint32_t account_id, std::string
     return order_id;
 }
 
-std::vector<pqxx::result> DatabaseTransactions::query_order(db_ptr C, uint32_t account_id, int order_id) {
-    pqxx::work W(*C);
+std::vector<pqxx::result> DatabaseTransactions::query_order(uint32_t account_id, int order_id) {
+    pqxx::work W(*thread_conn);
 
     //check if account exists; not going to be updating account table so no lock
     pqxx::result orderRes = W.exec_params(
@@ -325,8 +303,8 @@ std::vector<pqxx::result> DatabaseTransactions::query_order(db_ptr C, uint32_t a
 
 }
 
-std::vector<pqxx::result> DatabaseTransactions::cancel_order(db_ptr C, uint32_t account_id,int order_id) {
-    pqxx::work W(*C);
+std::vector<pqxx::result> DatabaseTransactions::cancel_order(uint32_t account_id,int order_id) {
+    pqxx::work W(*thread_conn);
 
     //check if account exists; not going to be updating account table so no lock
     pqxx::result orderRes = W.exec_params(

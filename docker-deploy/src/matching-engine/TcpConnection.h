@@ -13,9 +13,8 @@ public:
     boost::asio::ip::tcp::socket socket;
     char buffer[4096]; //buffer to read data into from async_read_some
     std::string message; //holds the total message read over a series of async_read_some
-    db_ptr C;
 
-    static ptr create(boost::asio::io_context& io_context, db_ptr db);
+    static ptr create(boost::asio::io_context& io_context);
     void start();
 
     void handle_write(const boost::system::error_code& error, size_t bytes);
@@ -24,7 +23,7 @@ public:
     int parse_message();
 
 private:
-    TcpConnection(boost::asio::io_context& io_context, db_ptr db);
+    TcpConnection(boost::asio::io_context& io_context);
 
 };
 
