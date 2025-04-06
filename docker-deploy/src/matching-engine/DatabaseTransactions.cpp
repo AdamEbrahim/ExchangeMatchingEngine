@@ -122,7 +122,7 @@ int DatabaseTransactions::place_order(uint32_t account_id, std::string& symbol, 
             throw CustomException("Insufficient balance.");
         }
 
-        //can release lock and update as we have guaranteed have resources
+        
         W.exec_params(
             "UPDATE Accounts SET balance = balance - $1 WHERE account_id = $2;",
             limit * amount, account_id
@@ -156,7 +156,7 @@ int DatabaseTransactions::place_order(uint32_t account_id, std::string& symbol, 
             throw CustomException("Insufficient currently owned shares of this symbol.");
         }
 
-        //can release lock and update as we have guaranteed have resources
+        
         W.exec_params(
             "UPDATE Holdings SET amount = amount + $1 WHERE account_id = $2 AND symbol = $3;",
             amount, account_id, symbol
@@ -170,8 +170,11 @@ int DatabaseTransactions::place_order(uint32_t account_id, std::string& symbol, 
         account_id, symbol, amount, amount, limit);
     int order_id = res[0][0].as<int>(); //store newly created order id so we can return it
 
+    W.commit();
+    pqxx::work W2(*thread_conn); //new transaction
+
     //do matching; order by order_id to create consistent order of row level locks in FOR UPDATE to prevent deadlock
-    res = W.exec_params(
+    res = W2.exec_params(
         "SELECT * FROM Orders "
         "WHERE symbol = $1 AND open_shares != 0 "
         "ORDER BY order_id ASC FOR UPDATE;",  //Consistent order by order_id
@@ -228,20 +231,31 @@ int DatabaseTransactions::place_order(uint32_t account_id, std::string& symbol, 
     }
 
     int buy_index = 0, sell_index = 0;
-    while (buy_index < buy_orders.size() && sell_index < sell_orders.size()) {
-        pqxx::row& buy = buy_orders[buy_index];
-        pqxx::row& sell = sell_orders[sell_index];
+    bool buyMoved = true, sellMoved = true;
+    pqxx::row& buy = buy_orders[buy_index];
+    pqxx::row& sell = sell_orders[sell_index];
+    int buy_id, buyer_account, buy_shares, sell_id, seller_account, sell_shares;
+    double buy_price, sell_price;
+    std::string buy_time, sell_time;
 
-        int buy_id = buy["order_id"].as<int>();
-        int sell_id = sell["order_id"].as<int>();
-        int buyer_account = buy["account_id"].as<int>();
-        int seller_account = sell["account_id"].as<int>();
-        int buy_shares = buy["open_shares"].as<int>();
-        int sell_shares = -sell["open_shares"].as<int>();
-        double buy_price = buy["limit_price"].as<double>();
-        double sell_price = sell["limit_price"].as<double>();
-        std::string buy_time = buy["timestamp"].as<std::string>();
-        std::string sell_time = sell["timestamp"].as<std::string>();
+    while (buy_index < buy_orders.size() && sell_index < sell_orders.size()) {
+        if (buyMoved) {
+            buy = buy_orders[buy_index];
+            buy_id = buy["order_id"].as<int>();
+            buyer_account = buy["account_id"].as<int>();
+            buy_shares = buy["open_shares"].as<int>();
+            buy_price = buy["limit_price"].as<double>();
+            buy_time = buy["timestamp"].as<std::string>();
+        }
+
+        if (sellMoved) {
+            sell = sell_orders[sell_index];
+            sell_id = sell["order_id"].as<int>();
+            seller_account = sell["account_id"].as<int>();
+            sell_shares = -sell["open_shares"].as<int>();
+            sell_price = sell["limit_price"].as<double>();
+            sell_time = sell["timestamp"].as<std::string>();
+        }
 
         if (buy_price < sell_price) {
             break; //no more possible matches
@@ -252,35 +266,48 @@ int DatabaseTransactions::place_order(uint32_t account_id, std::string& symbol, 
         int trade_shares = std::min(buy_shares, sell_shares);
 
         //update buyer; no concurrency issues as if any other transaction holds the lock this will pause on update
-        W.exec_params(
+        W2.exec_params(
             "INSERT INTO Holdings (account_id, symbol, amount) VALUES ($1, $2, $3) "
             "ON CONFLICT (account_id, symbol) DO UPDATE SET amount = Holdings.amount + EXCLUDED.amount;",
             buyer_account, symbol, trade_shares
         );
 
         //update seller; no concurrency issues as if any other transaction holds the lock this will pause
-        W.exec_params(
+        W2.exec_params(
             "UPDATE Accounts SET balance = balance + $1 WHERE account_id = $2;",
             trade_shares * exec_price, seller_account
         );
 
         //update orders
-        W.exec_params("UPDATE Orders SET open_shares = open_shares - $1 WHERE order_id = $2;", trade_shares, buy_id);
-        W.exec_params("UPDATE Orders SET open_shares = open_shares + $1 WHERE order_id = $2;", trade_shares, sell_id);
+        W2.exec_params("UPDATE Orders SET open_shares = open_shares - $1 WHERE order_id = $2;", trade_shares, buy_id);
+        W2.exec_params("UPDATE Orders SET open_shares = open_shares + $1 WHERE order_id = $2;", trade_shares, sell_id);
+        buy_shares -= trade_shares;
+        sell_shares -= trade_shares;
 
         //insert trade
-        W.exec_params(
+        W2.exec_params(
             "INSERT INTO Trades (buy_order_id, sell_order_id, symbol, traded_shares, price) "
             "VALUES ($1, $2, $3, $4, $5);",
             buy_id, sell_id, symbol, trade_shares, exec_price
         );
 
         //move pointer
-        if (trade_shares == buy_shares) buy_index++;
-        if (trade_shares == sell_shares) sell_index++;
+        if (buy_shares == 0)  {
+            buy_index++;
+            buyMoved = true;
+        } else {
+            buyMoved = false;
+        }
+
+        if (sell_shares == 0) { 
+            sell_index++;
+            sellMoved = true;
+        } else {
+            sellMoved = false;
+        }
     }
 
-    W.commit(); //lock released on all rows, another thread trying to run matching can continue
+    W2.commit(); //lock released on all rows, another thread trying to run matching can continue
 
     return order_id;
 }

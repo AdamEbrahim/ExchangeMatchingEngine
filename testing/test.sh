@@ -2,8 +2,8 @@
 
 echo "Test begins"
 
-CLIENTS=5
-REQUESTS=2
+CLIENTS=100
+REQUESTS=20
 START_TIME=$(date +%s%6N)  # Capture start time
 
 for ((i = 1; i <= CLIENTS; i++))
