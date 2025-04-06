@@ -206,29 +206,29 @@ int DatabaseTransactions::place_order(uint32_t account_id, std::string& symbol, 
         return (priceA < priceB) || (priceA == priceB && a["timestamp"].as<std::string>() < b["timestamp"].as<std::string>());
     });
 
-    std::cout << "buy list: " << std::endl;
-    for (auto& buy : buy_orders) {
-        int buy_id = buy["order_id"].as<int>();
-        int buyer_account = buy["account_id"].as<int>();
-        int buy_shares = buy["open_shares"].as<int>();
-        double buy_price = buy["limit_price"].as<double>();
-        std::string buy_time = buy["timestamp"].as<std::string>();
+    // std::cout << "buy list: " << std::endl;
+    // for (auto& buy : buy_orders) {
+    //     int buy_id = buy["order_id"].as<int>();
+    //     int buyer_account = buy["account_id"].as<int>();
+    //     int buy_shares = buy["open_shares"].as<int>();
+    //     double buy_price = buy["limit_price"].as<double>();
+    //     std::string buy_time = buy["timestamp"].as<std::string>();
 
-        std::cout << buy_id << " account: " << buyer_account << " shares: " << buy_shares << " price: " << buy_price << " time: " << buy_time << std::endl;
+    //     std::cout << buy_id << " account: " << buyer_account << " shares: " << buy_shares << " price: " << buy_price << " time: " << buy_time << std::endl;
         
-    }
+    // }
 
-    std::cout << "sell list: " << std::endl;
-    for (auto& buy : sell_orders) {
-        int buy_id = buy["order_id"].as<int>();
-        int buyer_account = buy["account_id"].as<int>();
-        int buy_shares = buy["open_shares"].as<int>();
-        double buy_price = buy["limit_price"].as<double>();
-        std::string buy_time = buy["timestamp"].as<std::string>();
+    // std::cout << "sell list: " << std::endl;
+    // for (auto& buy : sell_orders) {
+    //     int buy_id = buy["order_id"].as<int>();
+    //     int buyer_account = buy["account_id"].as<int>();
+    //     int buy_shares = buy["open_shares"].as<int>();
+    //     double buy_price = buy["limit_price"].as<double>();
+    //     std::string buy_time = buy["timestamp"].as<std::string>();
 
-        std::cout << buy_id << " account: " << buyer_account << " shares: " << buy_shares << " price: " << buy_price << " time: " << buy_time << std::endl;
+    //     std::cout << buy_id << " account: " << buyer_account << " shares: " << buy_shares << " price: " << buy_price << " time: " << buy_time << std::endl;
         
-    }
+    // }
 
     int buy_index = 0, sell_index = 0;
     bool buyMoved = true, sellMoved = true;
