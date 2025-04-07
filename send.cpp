@@ -113,10 +113,10 @@ int main() {
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
         "<create>\n"
         "<account id=\"123456\" balance=\"1000\"/>\n"
-        "<account id=\"789012\" balance=\"5000\"/>\n"
+        // "<account id=\"789012\" balance=\"5000\"/>\n"
         "<symbol sym=\"AAPL\">\n"
         "<account id=\"123456\">50</account>\n"
-        "<account id=\"789012\">75</account>\n"
+        "<account id=\"123456\">75</account>\n"
         "</symbol>\n"
         "</create>\n";
     send_request(sock, create_request);
@@ -126,10 +126,10 @@ int main() {
     // std::string transaction_request =
     //     "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
     //     "<transactions id=\"123456\">\n"
-    //     "<order sym=\"AAPL\" amount=\"-10\" limit=\"150\"/>\n"
+    //     // "<order sym=\"AAPL\" amount=\"-10\" limit=\"150\"/>\n"
     //     "<order sym=\"AAPL\" amount=\"20\" limit=\"140\"/>\n"
-    //     "<query id=\"1\"/>\n"
-    //     "<cancel id=\"1\"/>\n"
+    //     // "<query id=\"1\"/>\n"
+    //     // "<cancel id=\"1\"/>\n"
     //     "</transactions>\n";
     // send_request(sock, transaction_request);
     // receive_response(sock);

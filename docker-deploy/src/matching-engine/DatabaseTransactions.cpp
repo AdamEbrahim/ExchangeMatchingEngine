@@ -81,19 +81,10 @@ int DatabaseTransactions::insert_shares(uint32_t account_id, std::string& symbol
     pqxx::work W(*thread_conn);
 
     pqxx::result holdingRes = W.exec_params(
-        "SELECT amount FROM Holdings WHERE account_id = $1 AND symbol = $2 FOR UPDATE;", //make sure to acquire row lock
-        account_id, symbol
+        "INSERT INTO Holdings (account_id, symbol, amount) VALUES ($1, $2, $3) "
+            "ON CONFLICT (account_id, symbol) DO UPDATE SET amount = Holdings.amount + EXCLUDED.amount;", //make sure to acquire row lock
+        account_id, symbol, amount
     );
-
-    if (holdingRes.empty()) {
-        W.exec_params("INSERT INTO Holdings (account_id, symbol, amount) "
-                        "VALUES ($1, $2, $3);",
-                        account_id, symbol, amount);
-    } else {
-        W.exec_params("UPDATE Holdings SET amount = amount + $1 "
-                        "WHERE account_id = $2 AND symbol = $3;",
-                        amount, account_id, symbol);
-    }
 
     W.commit();
     return 1;

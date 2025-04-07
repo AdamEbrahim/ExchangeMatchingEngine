@@ -15,7 +15,7 @@ void send_request(int sock, const std::string& request) {
         close(sock);
         exit(1);
     }
-    std::cout << "Sent (" << message.size() << " bytes):\n" << request << std::endl;
+    //std::cout << "Sent (" << message.size() << " bytes):\n" << request << std::endl;
 }
 
 void receive_response(int sock) {
@@ -23,11 +23,11 @@ void receive_response(int sock) {
     int bytes_received = read(sock, buff, sizeof(buff) - 1);
     if (bytes_received > 0) {
         buff[bytes_received] = '\0';
-        std::cout << "Received (" << bytes_received << " bytes):\n" << buff << std::endl;
+        //std::cout << "Received (" << bytes_received << " bytes):\n" << buff << std::endl;
     } else {
         std::cerr << "No response received or read failed.\n";
     }
-    std::cout << "--------------------------------------\n";
+    //std::cout << "--------------------------------------\n";
 }
 
 int main(int argc, char * argv[]) {
