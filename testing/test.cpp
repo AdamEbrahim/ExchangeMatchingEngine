@@ -4,6 +4,7 @@
 #include <arpa/inet.h>
 #include <unistd.h>
 #include <cstdlib>
+#include <time.h>
 
 #define SERVER_IP   "127.0.0.1"
 #define SERVER_PORT 12345
@@ -40,7 +41,7 @@ int main(int argc, char * argv[]) {
 
     int sock = socket(AF_INET, SOCK_STREAM, 0);
     if (sock == -1) {
-        perror("Socket creation failed");
+        std::cout << "Socket creation failed" << std::endl;
         return 1;
     }
 
@@ -48,43 +49,45 @@ int main(int argc, char * argv[]) {
     server_addr.sin_family = AF_INET;
     server_addr.sin_port = htons(SERVER_PORT);
     if (inet_pton(AF_INET, SERVER_IP, &server_addr.sin_addr) <= 0) {
-        perror("Invalid address");
+        std::cout << "Invalid address"  << std::endl;
         close(sock);
         return 1;
     }
 
     if (connect(sock, (struct sockaddr*)&server_addr, sizeof(server_addr)) < 0) {
-        perror("Connection failed");
+        std::cout << "Connection failed" << std::endl;
         close(sock);
         return 1;
     }
 
-    // create account and add shares
+    //create account and add shares
     std::string create_request =
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
         "<create>\n"
-        "  <account id=\"" + aid + "\" balance=\"5000\"/>\n"
+        "  <account id=\"" + aid + "\" balance=\"500000\"/>\n"
         "  <symbol sym=\"AAPL\">\n"
-        "    <account id=\"" + aid + "\">50</account>\n"
+        "    <account id=\"" + aid + "\">1000</account>\n"
         "  </symbol>\n"
         "</create>\n";
 
     send_request(sock, create_request);
     receive_response(sock);
 
-    int remaining_shares = 50;
-    // send transaction requests
+    srand(time(NULL));
+
+    int remaining_shares = 1000;
+    //send transaction requests
     for (int i = 0; i < request_num; i++) {
         int amt = 10 + rand() % 10;
         // if (rand() % 2 == 0) amt *= -1;
         int lim = 95 + rand() % 10;
 
 
-        if (std::stoi(aid) % 2 == 1) { // sell
+        if (std::stoi(aid) % 2 == 1) { //sell
             if (amt > remaining_shares) amt = remaining_shares;
             amt *= -1;
-            remaining_shares += amt; // subtract
-            if (remaining_shares <= 0) break; // no more to sell
+            remaining_shares += amt; //subtract
+            if (remaining_shares <= 0) break; //no more to sell
         }
 
         std::string transaction_request =
