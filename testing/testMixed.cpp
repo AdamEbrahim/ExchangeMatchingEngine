@@ -44,11 +44,33 @@ std::string extract_order_id(const std::string& response) {
 }
 
 void run_client(int sock, std::string aid, int order_count) {
+    std::vector<std::string> stocks = {"AAPL", "GOOG", "NVDA", "AMZN", "MSFT", "SBUX", "DIS", "GE"};
     std::string create_request =
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
         "<create>\n"
         "  <account id=\"" + aid + "\" balance=\"500000\"/>\n"
         "  <symbol sym=\"AAPL\">\n"
+        "    <account id=\"" + aid + "\">1000</account>\n"
+        "  </symbol>\n"
+        "  <symbol sym=\"GOOG\">\n"
+        "    <account id=\"" + aid + "\">1000</account>\n"
+        "  </symbol>\n"
+        "  <symbol sym=\"NVDA\">\n"
+        "    <account id=\"" + aid + "\">1000</account>\n"
+        "  </symbol>\n"
+        "  <symbol sym=\"AMZN\">\n"
+        "    <account id=\"" + aid + "\">1000</account>\n"
+        "  </symbol>\n"
+        "  <symbol sym=\"MSFT\">\n"
+        "    <account id=\"" + aid + "\">1000</account>\n"
+        "  </symbol>\n"
+        "  <symbol sym=\"SBUX\">\n"
+        "    <account id=\"" + aid + "\">1000</account>\n"
+        "  </symbol>\n"
+        "  <symbol sym=\"DIS\">\n"
+        "    <account id=\"" + aid + "\">1000</account>\n"
+        "  </symbol>\n"
+        "  <symbol sym=\"GE\">\n"
         "    <account id=\"" + aid + "\">1000</account>\n"
         "  </symbol>\n"
         "</create>\n";
@@ -65,6 +87,8 @@ void run_client(int sock, std::string aid, int order_count) {
         // if (rand() % 2 == 0) amt *= -1;
         int lim = 95 + rand() % 10;
 
+        std::string stock = stocks[rand() % stocks.size()];
+
 
         if (std::stoi(aid) % 2 == 1) { //sell
             if (amt > remaining_shares) amt = remaining_shares;
@@ -76,7 +100,7 @@ void run_client(int sock, std::string aid, int order_count) {
         std::string transaction_request =
             "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
             "<transactions id=\"" + aid + "\">\n"
-            "  <order sym=\"AAPL\" amount=\"" + std::to_string(amt) +
+            "  <order sym=\"" + stock + "\" amount=\"" + std::to_string(amt) +
             "\" limit=\"" + std::to_string(lim) + "\"/>\n"
             "</transactions>\n";
 
